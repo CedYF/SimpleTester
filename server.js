@@ -238,11 +238,65 @@ app.get('/', (req, res) => {
           if (data.success) {
             html += '<p class="success">✅ All tests passed!</p>';
           } else {
-            html += '<p class="failed">❌ Some tests failed</p>';
+            html += \`<p class="failed">❌ \${data.message || 'Some tests failed'}</p>\`;
           }
           
           html += \`<p>Execution time: \${data.executionTime}s</p>\`;
-          html += '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+          
+          // Show test results in a nice format
+          if (data.testResults) {
+            html += '<div style="margin: 20px 0;">';
+            html += '<h4>Test Summary:</h4>';
+            
+            // Separate implemented vs coming soon
+            const implemented = {};
+            const comingSoon = {};
+            
+            for (const [name, result] of Object.entries(data.testResults)) {
+              if (result === '🔜 COMING SOON') {
+                comingSoon[name] = result;
+              } else {
+                implemented[name] = result;
+              }
+            }
+            
+            // Show implemented tests
+            if (Object.keys(implemented).length > 0) {
+              html += '<div style="margin: 10px 0;"><strong>Implemented Tests:</strong></div>';
+              for (const [name, result] of Object.entries(implemented)) {
+                const className = result.includes('PASSED') ? 'success' : 'failed';
+                html += \`<div class="test-item \${className}">\${name}: \${result}</div>\`;
+              }
+            }
+            
+            // Show failure details if any
+            if (data.failureDetails) {
+              html += '<div style="margin: 20px 0; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; padding: 15px;">';
+              html += '<h4 style="color: #856404; margin-top: 0;">Failure Analysis</h4>';
+              html += '<pre style="white-space: pre-wrap; color: #856404; font-size: 12px; font-family: monospace;">' + data.failureDetails.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>';
+              html += '</div>';
+            }
+            
+            // Show coming soon tests in collapsed view
+            if (Object.keys(comingSoon).length > 0) {
+              html += '<details style="margin: 20px 0;">';
+              html += '<summary style="cursor: pointer; font-weight: bold;">Coming Soon Tests (' + Object.keys(comingSoon).length + ')</summary>';
+              html += '<div style="margin-top: 10px;">';
+              for (const [name, result] of Object.entries(comingSoon)) {
+                html += \`<div class="test-item coming-soon">\${name}: \${result}</div>\`;
+              }
+              html += '</div>';
+              html += '</details>';
+            }
+            
+            html += '</div>';
+          }
+          
+          // Debug info in collapsed view
+          html += '<details style="margin-top: 20px;">';
+          html += '<summary style="cursor: pointer;">Debug Information</summary>';
+          html += '<pre style="margin-top: 10px; max-height: 400px; overflow-y: auto;">' + JSON.stringify(data, null, 2) + '</pre>';
+          html += '</details>';
           
           return html;
         }
@@ -481,16 +535,31 @@ async function runTestsInBackground(testId) {
       });
     }
     
+    // Extract failure details
+    let failureDetails = null;
+    const failureAnalysisMatch = output.match(/========== FAILURE ANALYSIS ==========[\s\S]*?========== RECOMMENDED ACTIONS ==========/);
+    if (failureAnalysisMatch) {
+      failureDetails = failureAnalysisMatch[0];
+    }
+    
+    // Extract test counts
+    const testFailureMatch = output.match(/❌ TESTS FAILED: (\d+)\/(\d+) tests failed/);
+    const failedCount = testFailureMatch ? parseInt(testFailureMatch[1]) : 0;
+    const totalCount = testFailureMatch ? parseInt(testFailureMatch[2]) : 0;
+    
     // Update final result
     testResults.set(testId, {
       ...result,
       status: 'completed',
       progress: 100,
       success: allTestsPassed,
-      testResults: currentTestResults,
+      testResults: currentTestResults || testResultsData,
       executionTime: output.match(/Total execution time: ([\d.]+)s/)?.[1] || Math.floor((Date.now() - new Date(result.startTime)) / 1000),
-      message: allTestsPassed ? 'All tests passed!' : 'Some tests failed',
-      output: output.substring(0, 5000) // Limit output size
+      message: allTestsPassed ? 'All tests passed!' : `${failedCount} of ${totalCount} tests failed`,
+      failureDetails: failureDetails,
+      failedCount: failedCount,
+      totalCount: totalCount,
+      output: output.substring(0, 10000) // Increase output size for better debugging
     });
     
   } catch (error) {

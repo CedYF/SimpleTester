@@ -1,0 +1,171 @@
+name: AdManage Tests
+
+on:
+  # Run on push to main branch
+  push:
+    branches: [ main ]
+  # Run on pull requests
+  pull_request:
+    branches: [ main ]
+  # Allow manual trigger
+  workflow_dispatch:
+  # Run on schedule (e.g., daily at 2 AM UTC)
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # Job timeout
+    
+    steps:
+    - name: Run AdManage Tests
+      id: run-tests
+      timeout-minutes: 7  # Step timeout (allow 7 minutes for the test)
+      run: |
+        echo "🚀 Starting AdManage tests..."
+        
+        # Start the tests asynchronously
+        start_response=$(curl -s -X POST https://simpletester-production.up.railway.app/run-admanage-tests-async)
+        test_id=$(echo "$start_response" | jq -r '.testId')
+        
+        if [ -z "$test_id" ] || [ "$test_id" = "null" ]; then
+          echo "❌ Failed to start tests"
+          echo "$start_response"
+          exit 1
+        fi
+        
+        echo "✅ Tests started with ID: $test_id"
+        echo ""
+        
+        # Poll for status updates
+        start_time=$(date +%s)
+        while true; do
+          # Get current status
+          status_response=$(curl -s https://simpletester-production.up.railway.app/test-status/$test_id)
+          
+          status=$(echo "$status_response" | jq -r '.status')
+          progress=$(echo "$status_response" | jq -r '.progress')
+          message=$(echo "$status_response" | jq -r '.message')
+          
+          # Calculate elapsed time
+          current_time=$(date +%s)
+          elapsed=$((current_time - start_time))
+          
+          # Show progress
+          echo -ne "\r⏳ [${elapsed}s] Progress: ${progress}% - ${message}                    "
+          
+          # Check if completed
+          if [ "$status" = "completed" ]; then
+            echo ""
+            echo ""
+            echo "✅ Tests completed!"
+            
+            # Get final results
+            success=$(echo "$status_response" | jq -r '.success')
+            execution_time=$(echo "$status_response" | jq -r '.executionTime')
+            test_results=$(echo "$status_response" | jq -r '.testResults')
+            failure_details=$(echo "$status_response" | jq -r '.failureDetails // empty')
+            
+            # Count passed/failed tests
+            if [ "$test_results" != "null" ]; then
+              passed_tests=$(echo "$test_results" | jq -r 'to_entries | map(select(.value | contains("PASSED"))) | length')
+              failed_tests=$(echo "$test_results" | jq -r 'to_entries | map(select(.value | contains("FAILED"))) | length')
+              total_tests=$((passed_tests + failed_tests))
+            else
+              passed_tests=0
+              failed_tests=0
+              total_tests=0
+            fi
+            
+            # Show test results
+            echo ""
+            echo "📊 Test Results:"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            if [ "$test_results" != "null" ]; then
+              echo "$test_results" | jq -r 'to_entries | .[] | "  \(.key): \(.value)"'
+            fi
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "Summary: $passed_tests passed, $failed_tests failed out of $total_tests tests"
+            echo "Execution Time: ${execution_time}s"
+            
+            # Show failure details if any
+            if [ "$failure_details" != "" ] && [ "$failure_details" != "null" ]; then
+              echo ""
+              echo "❌ Failure Details:"
+              echo "$failure_details"
+            fi
+            
+            # Set outputs
+            echo "success=$success" >> $GITHUB_OUTPUT
+            echo "message=$message" >> $GITHUB_OUTPUT
+            echo "execution_time=$execution_time" >> $GITHUB_OUTPUT
+            echo "test_summary=$passed_tests/$total_tests" >> $GITHUB_OUTPUT
+            
+            # Exit with appropriate code
+            if [ "$success" = "true" ]; then
+              echo ""
+              echo "✅ All tests passed!"
+              exit 0
+            else
+              echo ""
+              echo "❌ Some tests failed!"
+              exit 1
+            fi
+          fi
+          
+          # Check timeout (6 minutes)
+          if [ $elapsed -gt 360 ]; then
+            echo ""
+            echo "❌ Test timeout after 6 minutes"
+            exit 1
+          fi
+          
+          # Wait before next poll
+          sleep 2
+        done
+    
+    - name: Comment PR (if applicable)
+      if: github.event_name == 'pull_request' && always()
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const success = '${{ steps.run-tests.outputs.success }}' === 'true';
+          const message = '${{ steps.run-tests.outputs.message }}';
+          const executionTime = '${{ steps.run-tests.outputs.execution_time }}';
+          const testSummary = '${{ steps.run-tests.outputs.test_summary }}';
+          
+          const emoji = success ? '✅' : '❌';
+          const status = success ? 'passed' : 'failed';
+          
+          const comment = `${emoji} **AdManage Tests ${status}**
+          
+          - **Tests**: ${testSummary}
+          - **Execution Time**: ${executionTime}s
+          - **Message**: ${message}
+          
+          [View full test results](https://simpletester-production.up.railway.app/run-admanage-tests)`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
+    
+    - name: Create Test Report
+      if: always()
+      run: |
+        # Create a summary for the workflow
+        echo "## AdManage Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [ "${{ steps.run-tests.outputs.success }}" = "true" ]; then
+          echo "✅ **All tests passed!**" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Some tests failed**" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Tests**: ${{ steps.run-tests.outputs.test_summary }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Execution Time**: ${{ steps.run-tests.outputs.execution_time }}s" >> $GITHUB_STEP_SUMMARY
+        echo "- **Server**: https://simpletester-production.up.railway.app" >> $GITHUB_STEP_SUMMARY

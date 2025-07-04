@@ -6,7 +6,8 @@
       "Bash(npx playwright:*)",
       "Bash(npm run test:*)",
       "Bash(mv:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(ls:*)"
     ],
     "deny": []
   }
