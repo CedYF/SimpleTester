@@ -1,97 +1,108 @@
-# AdManage Launch Page Tester
+# AdManage Test Server
 
-A Playwright-based testing tool for AdManage.ai's launch page functionality.
-
-## Overview
-
-This project provides an automated test that:
-1. Logs into AdManage.ai using provided credentials
-2. Navigates to the launch page
-3. Tests the textarea functionality by entering text
-4. Verifies that the creative state updates correctly
+Automated Playwright tests for AdManage application with real-time progress tracking.
 
 ## Features
 
-- **Web Interface**: Clean UI to run tests and view real-time results
-- **Real-time Updates**: Live test progress via WebSocket connections
-- **Headless/Headed Mode**: Toggle browser visibility during tests
-- **Express Server**: Backend API for test execution
+- ✅ **Automated browser testing** with Playwright
+- 📊 **Real-time progress tracking** with live UI updates
+- 🔄 **GitHub Actions integration** for CI/CD
+- 🐳 **Docker containerized** deployment
+- 📈 **Health monitoring** endpoint
+- ⏱️ **Elapsed time counter** (Vercel-style)
 
-## Project Structure
+## Quick Start
 
-```
-SimpleTester/
-├── tests/
-│   └── admanage-simple.js    # Main test file
-├── public/
-│   └── index.html            # Web interface
-├── server.js                 # Express server with WebSocket support
-├── playwright.config.js      # Playwright configuration
-├── package.json             # Dependencies
-└── dbConfig.js              # Database configuration (if needed)
-```
+1. Deploy to Railway using the button above
+2. Configure environment variables
+3. Access your test server at `https://your-app.railway.app`
 
-## Setup
+## Endpoints
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+### Web UI
+- `GET /` - Interactive test runner with progress bar
 
-2. Start the server:
-   ```bash
-   npm start
-   ```
-   Or for development with auto-reload:
-   ```bash
-   npm run dev
-   ```
+### API Endpoints
+- `GET /run-admanage-tests` - Synchronous test execution (for CI/CD)
+- `POST /run-admanage-tests-async` - Asynchronous test execution
+- `GET /test-status/:id` - Check test progress
+- `GET /health` - Health check endpoint
 
-3. Open http://localhost:3456 in your browser
+## Local Development
 
-## Running Tests
-
-### Via Web Interface
-1. Navigate to http://localhost:3456
-2. Click "Run Test" button
-3. Check "Show Browser" to see the test execution
-4. View real-time progress and results
-
-### Via Command Line
 ```bash
-# Default - shows browser
-npm test
+# Install dependencies
+npm install
 
-# Run in headless mode (no browser window)
-npm run test:headless
+# Run server locally
+npm start
+
+# Run tests directly
+npm test
 ```
 
-## Test Details
+Open http://localhost:3456 in your browser
 
-The test performs the following steps:
-1. Navigates to https://admanage.ai/sign_in_fb
-2. Enters email and password
-3. Submits login form
-4. Waits for redirect to /launch page
-5. Finds the `textarea#primaryText` element
-6. Types "Cedric123" into the textarea
-7. Verifies that the creative state (`pre#creativeState`) contains "Cedric123"
+## Environment Variables
 
-## Configuration
+- `PORT` - Server port (default: 3456)
+- `HEADLESS` - Run tests in headless mode (default: true)
+- `TEST_SPEED` - Test execution speed: FAST, NORMAL, SAFE (default: FAST)
 
-- **Port**: Default 3456 (configurable via PORT environment variable)
-- **Headless Mode**: Toggle in web interface or via CLI flags
-- **Timeout**: 30 seconds for page loads, configurable in playwright.config.js
+## Test Categories
 
-## API Endpoints
+### ✅ Implemented Tests
+- Gallery Mode inputs and global defaults
+- Table Mode row updates and CTA changes
+- Media Loader (3 items)
+- Launch Status Switch toggle
+- Special Testing toggle with modal
 
-- `GET /` - Server status and available endpoints
-- `GET /health` - Health check
-- `POST /run-tests` - Execute Playwright tests
-- `GET /results/:id` - Get test results by ID
-- WebSocket at `/` for real-time updates
+### 🔜 Coming Soon
+- Relaunch Functionality
+- Multi Format (Double/Triple Placement)
+- Flexible & Carousel modes
+- Account switching
+- Multi Language support
+- Template assignments
+- External media loaders (Google Drive, Dropbox, Meta Library)
 
-## Requirements
+## Railway Deployment
 
-- Node.js >= 18.0.0
-- Chrome/Chromium browser
+The server uses Docker for consistent deployment. Railway will automatically:
+1. Build the Docker image with Playwright v1.40.0
+2. Install Chromium browser
+3. Start the Express server on port 3456
+4. Make endpoints available via HTTPS
+
+## GitHub Actions Integration
+
+Add your Railway URL as a GitHub secret:
+- Name: `RAILWAY_SERVER_URL`
+- Value: `https://your-app.railway.app`
+
+The workflow will run tests on:
+- Push to main branch
+- Pull requests
+- Daily at 2 AM UTC
+- Manual trigger
+
+## Troubleshooting
+
+### Railway Deployment Issues
+1. **Playwright not found**: Docker build will handle installation
+2. **Tests timeout**: Increase `TEST_SPEED` to NORMAL or SAFE
+3. **Memory issues**: Railway provides sufficient resources by default
+
+### Test Failures
+1. Check Railway logs: `railway logs`
+2. Verify AdManage.ai is accessible
+3. Ensure login credentials are correct
+4. Check element selectors haven't changed
+
+## Security Notes
+
+- Never commit credentials to the repository
+- Use environment variables for sensitive data
+- Consider adding authentication to endpoints for production use
+- Add rate limiting to prevent abuse

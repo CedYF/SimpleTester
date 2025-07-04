@@ -14,7 +14,9 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     actionTimeout: 0,
-    trace: 'on-first-retry',
+    trace: 'off',
+    screenshot: 'off',
+    video: 'off',
     // Use environment variable to control headless mode
     headless: process.env.HEADLESS === 'true',
     // Speed optimizations
