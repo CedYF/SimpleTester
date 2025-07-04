@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm:*)",
+      "Bash(cat:*)",
+      "Bash(npx playwright:*)",
+      "Bash(npm run test:*)",
+      "Bash(mv:*)",
+      "Bash(mkdir:*)"
+    ],
+    "deny": []
+  }
+}

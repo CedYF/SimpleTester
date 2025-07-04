@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Playwright Test Runner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <style>
+        .bg-gray-750 {
+            background-color: #374151;
+        }
+        .test-item {
+            transition: all 0.2s ease-in-out;
+        }
+        .test-item:hover {
+            background-color: #4B5563;
+        }
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #60a5fa;
+            border-radius: 50%;
+            border-top-color: #2563eb;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen p-6">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold text-center mb-8 bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">
+            AdManage Launch Page Tester
+        </h1>
+        
+        <div class="bg-gray-800 rounded-lg p-6 mb-6">
+            <div class="flex gap-4 mb-4">
+                <button id="runTestBtn" onclick="runTest()" class="px-6 py-2 bg-gradient-to-r from-green-400 to-blue-500 text-gray-900 font-semibold rounded-lg hover:shadow-lg transform hover:-translate-y-0.5 transition-all">
+                    Run Test
+                </button>
+                <button onclick="clearResults()" class="px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors">
+                    Clear
+                </button>
+            </div>
+            <div class="flex gap-4 mb-4">
+                <input type="text" id="serverUrl" placeholder="Server URL (default: http://localhost:3456)" class="flex-1 px-4 py-2 bg-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <label class="flex items-center space-x-2 text-sm">
+                    <input type="checkbox" id="headedMode" class="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500">
+                    <span>Show Browser</span>
+                </label>
+            </div>
+        </div>
+
+        <div id="testContainer" class="space-y-4"></div>
+    </div>
+
+    <script>
+        let socket;
+        let currentTestId;
+
+        function connectSocket() {
+            const url = document.getElementById('serverUrl').value || 'http://localhost:3456';
+            socket = io(url);
+            return socket;
+        }
+
+        async function runTest() {
+            const serverUrl = document.getElementById('serverUrl').value || 'http://localhost:3456';
+            const headedMode = document.getElementById('headedMode').checked;
+            const btn = document.getElementById('runTestBtn');
+            btn.disabled = true;
+            btn.textContent = 'Running...';
+
+            try {
+                const response = await fetch(`${serverUrl}/run-tests`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        testPath: 'admanage-simple.js',
+                        config: { 
+                            browser: 'chromium',
+                            headed: headedMode
+                        }
+                    })
+                });
+
+                const { testId } = await response.json();
+                currentTestId = testId;
+
+                if (!socket || !socket.connected) {
+                    socket = connectSocket();
+                }
+
+                socket.emit('subscribe', testId);
+                createTestCard(testId);
+
+                socket.on('test-update', (data) => updateTestCard(data));
+                socket.on('test-output', (data) => appendOutput(data));
+                socket.on('test-complete', (data) => completeTest(data));
+            } catch (error) {
+                alert('Error: ' + error.message);
+                btn.disabled = false;
+                btn.textContent = 'Run Test';
+            }
+        }
+
+        function createTestCard(testId) {
+            const container = document.getElementById('testContainer');
+            const card = document.createElement('div');
+            card.id = `test-${testId}`;
+            card.className = 'bg-gray-800 rounded-lg p-6 border border-gray-700';
+            card.innerHTML = `
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-semibold">Test #${testId}</h3>
+                    <span class="status px-3 py-1 rounded-full text-xs font-semibold bg-blue-500">Running</span>
+                </div>
+                <div class="mb-4">
+                    <div class="w-full bg-gray-700 rounded-full h-2 mb-2">
+                        <div class="progress-bar bg-gradient-to-r from-green-400 to-blue-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                    <div class="flex justify-between text-sm text-gray-400">
+                        <span class="progress-text">0%</span>
+                        <span class="test-message">Starting...</span>
+                    </div>
+                </div>
+                <div class="test-list mb-4">
+                    <h4 class="text-sm font-semibold text-gray-300 mb-2">Test Progress:</h4>
+                    <div class="test-items space-y-2">
+                        <!-- Dynamic test items will be added here -->
+                    </div>
+                </div>
+                <div class="output bg-gray-900 rounded p-4 font-mono text-sm text-gray-300 max-h-96 overflow-y-auto">
+                    <div class="text-gray-500">Waiting for test output...</div>
+                </div>
+            `;
+            // Explicitly set progress bar and text to 0%
+            card.querySelector('.progress-bar').style.width = '0%';
+            card.querySelector('.progress-text').textContent = '0%';
+            container.insertBefore(card, container.firstChild);
+        }
+
+        function updateTestCard(data) {
+            const card = document.getElementById(`test-${data.testId}`);
+            if (!card) return;
+
+            const progressBar = card.querySelector('.progress-bar');
+            const progressText = card.querySelector('.progress-text');
+            const message = card.querySelector('.test-message');
+
+            // Always show 0% if data.progress is undefined or null
+            const progress = (typeof data.progress === 'number' && !isNaN(data.progress)) ? data.progress : 0;
+            progressBar.style.width = `${progress}%`;
+            progressText.textContent = `${progress}%`;
+            message.textContent = data.message || 'Running...';
+        }
+
+        function appendOutput(data) {
+            const card = document.getElementById(`test-${data.testId}`);
+            if (!card) return;
+
+            const output = card.querySelector('.output');
+            
+            // Clear the "waiting" message if it's the first output
+            if (output.innerHTML.includes('Waiting for test output')) {
+                output.innerHTML = '';
+            }
+            
+            // Add timestamp to output
+            const timestamp = new Date().toLocaleTimeString();
+            const outputLine = `<div class="output-line"><span class="text-gray-500">[${timestamp}]</span> ${escapeHtml(data.output)}</div>`;
+            output.innerHTML += outputLine;
+            output.scrollTop = output.scrollHeight;
+            
+            // Parse output for test progress
+            parseTestProgress(data.output, card);
+        }
+
+        function parseTestProgress(output, card) {
+            if (card.getAttribute('data-completed') === 'true') return;
+            const outputText = output.toLowerCase();
+            const testItemsContainer = card.querySelector('.test-items');
+            
+            // Test pattern for launch page test
+            const testPatterns = [
+                { 
+                    name: 'Login and test launch page textarea', 
+                    pattern: 'login and test launch page textarea', 
+                    keywords: ['login', 'launch', 'textarea', 'cedric123', 'primarytext', 'creative state'],
+                    description: 'Logs in and tests typing "Cedric123" into textarea'
+                }
+            ];
+            
+            // Check for test completion (✓ symbol or "passed")
+            if (output.includes('✓') || output.includes('passed')) {
+                testPatterns.forEach(test => {
+                    if (outputText.includes(test.pattern.toLowerCase()) || 
+                        test.keywords.some(keyword => outputText.includes(keyword))) {
+                        updateOrCreateTestItem(testItemsContainer, test.name, 'passed', test.description);
+                    }
+                });
+            }
+            
+            // Check for test start (running) - look for test names in output
+            testPatterns.forEach(test => {
+                if (outputText.includes(test.pattern.toLowerCase()) && 
+                    !output.includes('✓') && !output.includes('passed')) {
+                    updateOrCreateTestItem(testItemsContainer, test.name, 'running', test.description);
+                }
+            });
+            
+            // Check for specific console.log messages that indicate test progress
+            if (output.includes('Navigating to sign in page')) {
+                updateOrCreateTestItem(testItemsContainer, 'Login and test launch page textarea', 'running', 'Navigating to login page');
+            }
+            if (output.includes('Filling in login credentials')) {
+                updateOrCreateTestItem(testItemsContainer, 'Login and test launch page textarea', 'running', 'Entering credentials');
+            }
+            if (output.includes('Successfully logged in')) {
+                updateOrCreateTestItem(testItemsContainer, 'Login and test launch page textarea', 'running', 'Logged in successfully');
+            }
+            if (output.includes('Testing AdCopy section inputs')) {
+                updateOrCreateTestItem(testItemsContainer, 'Login and test launch page textarea', 'running', 'Testing AdCopy inputs');
+            }
+            if (output.includes('✓ Filled primary text')) {
+                updateOrCreateTestItem(testItemsContainer, 'Login and test launch page textarea', 'running', 'Filled primary text');
+            }
+            if (output.includes('✓ Filled headline')) {
+                updateOrCreateTestItem(testItemsContainer, 'Login and test launch page textarea', 'running', 'Filled headline');
+            }
+            if (output.includes('✓ Filled description')) {
+                updateOrCreateTestItem(testItemsContainer, 'Login and test launch page textarea', 'running', 'Filled description');
+            }
+            if (output.includes('Checking creative state')) {
+                updateOrCreateTestItem(testItemsContainer, 'Login and test launch page textarea', 'running', 'Verifying state');
+            }
+            if (output.includes('ALL TESTS PASSED')) {
+                updateOrCreateTestItem(testItemsContainer, 'Login and test launch page textarea', 'passed', 'All inputs verified in state');
+            }
+            
+            // Check for errors
+            if (output.includes('Error:') || output.includes('FAILED') || output.includes('✗')) {
+                const errorMatch = output.match(/(Error:|FAILED|✗)\s*(.+)/);
+                if (errorMatch) {
+                    showError(card, errorMatch[2]);
+                }
+            }
+            
+            // Check for test count
+            const testCountMatch = output.match(/Running (\d+) tests/);
+            if (testCountMatch) {
+                const totalTests = parseInt(testCountMatch[1]);
+                updateProgressFromCount(card, totalTests);
+            }
+        }
+
+        function updateOrCreateTestItem(container, testName, status, description = '') {
+            const card = container.closest('.bg-gray-800');
+            if (card && card.getAttribute('data-completed') === 'true') return;
+            let testItem = container.querySelector(`[data-test="${testName}"]`);
+            
+            if (!testItem) {
+                testItem = document.createElement('div');
+                testItem.className = 'test-item flex items-start space-x-3 p-2 rounded bg-gray-750';
+                testItem.setAttribute('data-test', testName);
+                testItem.innerHTML = `
+                    <div class="test-status w-5 h-5 rounded-full bg-gray-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span class="text-xs">⏳</span>
+                    </div>
+                    <div class="flex-1">
+                        <div class="text-sm font-medium text-gray-300">${testName}</div>
+                        ${description ? `<div class="text-xs text-gray-500 mt-1">${description}</div>` : ''}
+                    </div>
+                `;
+                container.appendChild(testItem);
+            }
+            
+            updateTestItemStatus(testItem, status);
+        }
+
+        function updateTestItemStatus(testItem, status) {
+            const statusElement = testItem.querySelector('.test-status');
+            const textElement = testItem.querySelector('div:last-child');
+            if (status === 'passed') {
+                statusElement.className = 'test-status w-5 h-5 rounded-full bg-green-500 flex items-center justify-center';
+                statusElement.innerHTML = '<span class="text-xs text-white">✓</span>';
+                textElement.className = 'text-sm text-green-400 font-medium';
+            } else if (status === 'running') {
+                statusElement.className = 'test-status w-5 h-5 flex items-center justify-center';
+                statusElement.innerHTML = `<svg class="animate-spin h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>`;
+                textElement.className = 'text-sm text-blue-400 font-medium';
+            } else if (status === 'failed') {
+                statusElement.className = 'test-status w-5 h-5 rounded-full bg-red-500 flex items-center justify-center';
+                statusElement.innerHTML = '<span class="text-xs text-white">✗</span>';
+                textElement.className = 'text-sm text-red-400 font-medium';
+            } else {
+                // For pending, show a subtle gray dot (no hourglass)
+                statusElement.className = 'test-status w-5 h-5 rounded-full bg-gray-400 flex items-center justify-center';
+                statusElement.innerHTML = '';
+                textElement.className = 'text-sm text-gray-400';
+            }
+        }
+
+        function showError(card, errorMessage) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'bg-red-900 border border-red-700 rounded p-3 mb-4';
+            errorDiv.innerHTML = `
+                <div class="flex items-center space-x-2">
+                    <span class="text-red-400">⚠️</span>
+                    <span class="text-red-200 font-medium">Error:</span>
+                </div>
+                <div class="text-red-300 text-sm mt-1">${escapeHtml(errorMessage)}</div>
+            `;
+            
+            const testList = card.querySelector('.test-list');
+            testList.parentNode.insertBefore(errorDiv, testList);
+        }
+
+        function updateProgressFromCount(card, totalTests) {
+            const testItems = card.querySelectorAll('.test-item');
+            const passedTests = card.querySelectorAll('.test-item .test-status.bg-green-500').length;
+            const progress = Math.round((passedTests / totalTests) * 100);
+            
+            const progressBar = card.querySelector('.progress-bar');
+            const progressText = card.querySelector('.progress-text');
+            const message = card.querySelector('.test-message');
+            
+            progressBar.style.width = `${progress}%`;
+            progressText.textContent = `${progress}%`;
+            message.textContent = `${passedTests}/${totalTests} tests completed`;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function completeTest(data) {
+            const card = document.getElementById(`test-${data.testId}`);
+            if (!card) return;
+            card.setAttribute('data-completed', 'true');
+
+            const status = card.querySelector('.status');
+            const statusClasses = {
+                passed: 'bg-green-500',
+                failed: 'bg-red-500',
+                error: 'bg-yellow-500'
+            };
+            status.className = `status px-3 py-1 rounded-full text-xs font-semibold ${statusClasses[data.status] || 'bg-gray-500'}`;
+            status.textContent = data.status.toUpperCase();
+
+            // Progress bar and message elements
+            const progressBar = card.querySelector('.progress-bar');
+            const progressText = card.querySelector('.progress-text');
+            const message = card.querySelector('.test-message');
+
+            // Description map for known tests
+            const descriptionMap = {
+                'Login and test launch page textarea': 'Logs in and tests typing "Cedric123" into textarea'
+            };
+
+            // Parse the report for test results
+            if (data.report && data.report.suites) {
+                const testItemsContainer = card.querySelector('.test-items');
+                testItemsContainer.innerHTML = '';
+                let passed = 0, failed = 0, total = 0;
+                // Flatten all specs
+                const allSpecs = [];
+                function collectSpecs(suite) {
+                    if (suite.specs) allSpecs.push(...suite.specs);
+                    if (suite.suites) suite.suites.forEach(collectSpecs);
+                }
+                data.report.suites.forEach(collectSpecs);
+                // Recreate test items in order and with exact names from the report
+                allSpecs.forEach(spec => {
+                    total++;
+                    let status = 'pending';
+                    if (spec.ok) {
+                        status = 'passed';
+                        passed++;
+                    } else if (spec.tests && spec.tests.some(t => t.status === 'failed')) {
+                        status = 'failed';
+                        failed++;
+                    }
+                    // Use description from map if available
+                    const desc = descriptionMap[spec.title] || '';
+                    updateOrCreateTestItem(testItemsContainer, spec.title, status, desc);
+                });
+                // Update progress bar and text
+                const percent = total ? Math.round((passed / total) * 100) : 100;
+                progressBar.style.width = `${percent}%`;
+                progressText.textContent = `${percent}%`;
+                message.textContent = `Completed in ${(data.duration / 1000).toFixed(2)}s | Passed: ${passed}, Failed: ${failed}`;
+            } else {
+                // Fallback if no report
+                progressBar.style.width = '100%';
+                progressText.textContent = '100%';
+                message.textContent = `Completed in ${(data.duration / 1000).toFixed(2)}s`;
+            }
+
+            document.getElementById('runTestBtn').disabled = false;
+            document.getElementById('runTestBtn').textContent = 'Run Test';
+            socket.emit('unsubscribe', data.testId);
+        }
+
+        function toggleOutput(testId) {
+            const card = document.getElementById(`test-${testId}`);
+            const output = card.querySelector('.output');
+            const button = card.querySelector('button');
+            
+            if (output.classList.contains('hidden')) {
+                output.classList.remove('hidden');
+                button.textContent = 'Hide Output';
+            } else {
+                output.classList.add('hidden');
+                button.textContent = 'Show Output';
+            }
+        }
+
+        function clearResults() {
+            document.getElementById('testContainer').innerHTML = '';
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+{
+  "name": "playwright-test-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "HEADLESS=false TEST_SPEED=NORMAL playwright test tests/admanage-main.test.js",
+    "test:headless": "HEADLESS=true TEST_SPEED=FAST playwright test tests/admanage-main.test.js",
+    "test:fast": "HEADLESS=false TEST_SPEED=FAST playwright test tests/admanage-main.test.js",
+    "test:debug": "HEADLESS=false TEST_SPEED=SAFE playwright test tests/admanage-main.test.js --debug",
+    "test:gallery": "HEADLESS=false TEST_SPEED=FAST playwright test tests/admanage-gallery.test.js",
+    "test:table": "HEADLESS=false TEST_SPEED=FAST playwright test tests/admanage-table.test.js",
+    "test:parallel": "HEADLESS=false TEST_SPEED=FAST playwright test tests/admanage-gallery.test.js tests/admanage-table.test.js --workers=2"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "playwright": "^1.40.0",
+    "@playwright/test": "^1.40.0",
+    "cors": "^2.8.5",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.6.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
